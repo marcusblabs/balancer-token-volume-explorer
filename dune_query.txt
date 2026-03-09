@@ -1,0 +1,23 @@
+SELECT
+  blockchain,
+  project,
+  version,
+  block_date,
+  SUM(amount_usd) AS total_amount_usd
+FROM dex.trades
+WHERE
+  blockchain = '{{chain}}'
+  AND block_date >= TRY_CAST('{{date}}' AS DATE)
+  AND (
+    (token_bought_address = FROM_HEX(REPLACE('{{token_a_address}}', '0x', '')) AND token_sold_address = FROM_HEX(REPLACE('{{token_b_address}}', '0x', '')))
+    OR
+    (token_sold_address   = FROM_HEX(REPLACE('{{token_a_address}}', '0x', '')) AND token_bought_address = FROM_HEX(REPLACE('{{token_b_address}}', '0x', '')))
+  )
+GROUP BY
+  blockchain,
+  project,
+  version,
+  block_date
+ORDER BY
+  block_date DESC,
+  total_amount_usd DESC
