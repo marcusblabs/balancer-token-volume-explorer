@@ -45,7 +45,7 @@ export function useDuneQuery() {
     setStatus(STATUS.IDLE)
   }, [])
 
-  const run = useCallback(async ({ chain, tokenA, tokenB, date }) => {
+  const run = useCallback(async ({ chain, tokenA, date }) => {
     if (!API_KEY || API_KEY === 'your_api_key_here') {
       setError('No API key found. Add VITE_DUNE_API_KEY to your .env file.')
       setStatus(STATUS.ERROR)
@@ -76,10 +76,9 @@ export function useDuneQuery() {
         headers: duneHeaders(),
         body: JSON.stringify({
           query_parameters: {
-            chain:             chain,
-            token_a_address:   tokenA.address,
-            token_b_address:   tokenB.address,
-            date:              date,
+            chain:           chain,
+            token_address:   tokenA.address,
+            date:            date,
           },
           performance: 'medium',
         }),

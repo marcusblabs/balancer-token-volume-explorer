@@ -31,7 +31,7 @@ const S = {
   },
 }
 
-export default function ResultsTable({ status, rows, columns, error, meta, executionId, onCancel }) {
+export default function ResultsTable({ status, rows, columns, error, meta, executionId, onCancel, registry }) {
   const [page, setPage] = useState(0)
   const [showGrid, setShowGrid] = useState(false)
   const PAGE_SIZE = 50
@@ -161,7 +161,7 @@ export default function ResultsTable({ status, rows, columns, error, meta, execu
       </div>
 
       <div style={{ padding: 12 }}>
-        <ProjectVersionChart rows={rows} />
+        <ProjectVersionChart rows={rows} registry={registry} />
 
         <div style={{ marginTop: 12, border: '1px solid #c4cfde', borderRadius: 10, overflow: 'hidden', background: '#f7f9fd' }}>
           <button

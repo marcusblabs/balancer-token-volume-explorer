@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 
 const VERSION_COLORS = [
   '#3b82f6',
@@ -39,14 +39,18 @@ function buildSeries(rows) {
     const project = normalizeLabel(row.project, 'unknown')
     const version = normalizeLabel(row.version, 'unknown')
     const amount = toAmount(row.total_amount_usd ?? row.amount_usd ?? 0)
+    const paired = normalizeLabel(row.paired_token_address, 'unknown')
     if (amount <= 0) continue
 
     if (!projectMap.has(project)) {
-      projectMap.set(project, new Map())
+      projectMap.set(project, { versions: new Map(), pairings: new Map() })
     }
 
-    const projectVersions = projectMap.get(project)
-    projectVersions.set(version, (projectVersions.get(version) ?? 0) + amount)
+    const proj = projectMap.get(project)
+    proj.versions.set(version, (proj.versions.get(version) ?? 0) + amount)
+    if (!proj.pairings.has(paired)) proj.pairings.set(paired, new Map())
+    const pv = proj.pairings.get(paired)
+    pv.set(version, (pv.get(version) ?? 0) + amount)
     versionTotals.set(version, (versionTotals.get(version) ?? 0) + amount)
   }
 
@@ -59,13 +63,22 @@ function buildSeries(rows) {
   )
 
   const projects = [...projectMap.entries()]
-    .map(([project, versionMap]) => {
+    .map(([project, { versions: versionMap, pairings }]) => {
       const segments = versions
         .filter((version) => versionMap.has(version))
         .map((version) => ({ version, value: versionMap.get(version) }))
 
       const total = segments.reduce((sum, seg) => sum + seg.value, 0)
-      return { project, total, segments }
+
+      const pairingList = [...pairings.entries()]
+        .map(([address, vMap]) => {
+          const total = [...vMap.values()].reduce((s, v) => s + v, 0)
+          const segs = versions.filter((v) => vMap.has(v)).map((v) => ({ version: v, value: vMap.get(v) }))
+          return { address, total, segments: segs }
+        })
+        .sort((a, b) => b.total - a.total)
+
+      return { project, total, segments, pairingList }
     })
     .sort((a, b) => b.total - a.total)
 
@@ -74,8 +87,25 @@ function buildSeries(rows) {
   return { projects, versions, colorByVersion, maxTotal }
 }
 
-export default function ProjectVersionChart({ rows }) {
+function truncateAddress(addr) {
+  if (!addr || addr === 'unknown') return addr
+  if (addr.length <= 14) return addr
+  return `${addr.slice(0, 8)}...${addr.slice(-6)}`
+}
+
+export default function ProjectVersionChart({ rows, registry }) {
   const { projects, versions, colorByVersion, maxTotal } = useMemo(() => buildSeries(rows), [rows])
+  const [expanded, setExpanded] = useState(null)
+
+  const tokenByAddress = useMemo(() => {
+    const map = new Map()
+    for (const tokens of Object.values(registry ?? {})) {
+      for (const t of tokens) {
+        map.set(t.address.toLowerCase(), t)
+      }
+    }
+    return map
+  }, [registry])
 
   if (projects.length === 0 || maxTotal <= 0) {
     return null
@@ -120,57 +150,120 @@ export default function ProjectVersionChart({ rows }) {
         ))}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 420, overflowY: 'auto', paddingRight: 8, boxSizing: 'border-box' }}>
-        {projects.map((projectRow, idx) => (
-          <div key={projectRow.project}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4, gap: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                <span
-                  style={{
-                    minWidth: 24,
-                    padding: '1px 6px',
-                    borderRadius: 999,
-                    border: '1px solid #d2daea',
-                    background: '#eef3fb',
-                    color: '#5c6b7d',
-                    fontSize: 10,
-                    textAlign: 'center',
-                  }}
-                >
-                  #{idx + 1}
-                </span>
-                <span
-                  style={{
-                    color: '#243447',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                  title={projectRow.project}
-                >
-                  {projectRow.project}
-                </span>
-              </div>
-              <span style={{ color: '#4f6077', fontSize: 11 }}>{formatCompactUsd(projectRow.total)}</span>
-            </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 520, overflowY: 'auto', paddingRight: 8, boxSizing: 'border-box' }}>
+        {projects.map((projectRow, idx) => {
+          const isExpanded = expanded === projectRow.project
+          const pairingMax = projectRow.pairingList[0]?.total ?? 0
 
-            <div style={{ display: 'flex', height: 14, borderRadius: 6, overflow: 'hidden', background: '#e6edf9' }}>
-              {projectRow.segments.map((segment) => (
+          return (
+            <div key={projectRow.project}>
+              <div
+                onClick={() => setExpanded(isExpanded ? null : projectRow.project)}
+                style={{ cursor: 'pointer' }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4, gap: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                    <span
+                      style={{
+                        minWidth: 24,
+                        padding: '1px 6px',
+                        borderRadius: 999,
+                        border: '1px solid #d2daea',
+                        background: '#eef3fb',
+                        color: '#5c6b7d',
+                        fontSize: 10,
+                        textAlign: 'center',
+                      }}
+                    >
+                      #{idx + 1}
+                    </span>
+                    <span
+                      style={{
+                        color: '#243447',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                      title={projectRow.project}
+                    >
+                      {projectRow.project}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: '#4f6077', fontSize: 11 }}>{formatCompactUsd(projectRow.total)}</span>
+                    <span style={{ color: '#8a9ab0', fontSize: 10 }}>{isExpanded ? '▲' : '▼'}</span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', height: 14, borderRadius: 6, overflow: 'hidden', background: '#e6edf9' }}>
+                  {projectRow.segments.map((segment) => (
+                    <div
+                      key={`${projectRow.project}-${segment.version}`}
+                      title={`${projectRow.project} | v${segment.version}: ${formatCompactUsd(segment.value)}`}
+                      style={{
+                        width: `${(segment.value / maxTotal) * 100}%`,
+                        minWidth: 2,
+                        background: colorByVersion[segment.version],
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {isExpanded && (
                 <div
-                  key={`${projectRow.project}-${segment.version}`}
-                  title={`${projectRow.project} | v${segment.version}: ${formatCompactUsd(segment.value)}`}
                   style={{
-                    width: `${(segment.value / maxTotal) * 100}%`,
-                    minWidth: 2,
-                    background: colorByVersion[segment.version],
+                    marginTop: 8,
+                    padding: '10px 12px',
+                    background: '#edf2fa',
+                    border: '1px solid #d2daea',
+                    borderRadius: 8,
                   }}
-                />
-              ))}
+                >
+                  <div style={{ fontSize: 10, color: '#5c6b7d', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
+                    Paired tokens — {projectRow.pairingList.length} unique
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {projectRow.pairingList.map(({ address, total, segments: pairSegs }) => {
+                      const token = tokenByAddress.get(address?.toLowerCase())
+                      return (
+                      <div key={address}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                          <span
+                            style={{ fontSize: 10, color: '#365fd9', fontFamily: "'JetBrains Mono', monospace" }}
+                            title={address}
+                          >
+                            {token ? (
+                              <><span style={{ fontWeight: 600 }}>{token.symbol}</span><span style={{ color: '#8a9ab0', marginLeft: 6 }}>{address}</span></>
+                            ) : address}
+                          </span>
+                          <span style={{ fontSize: 10, color: '#4f6077' }}>{formatCompactUsd(total)}</span>
+                        </div>
+                        <div style={{ display: 'flex', height: 6, borderRadius: 4, overflow: 'hidden', background: '#dae3f0' }}>
+                          {pairSegs.map((seg) => (
+                            <div
+                              key={seg.version}
+                              title={`${seg.version}: ${formatCompactUsd(seg.value)}`}
+                              style={{
+                                height: '100%',
+                                width: `${(seg.value / pairingMax) * 100}%`,
+                                minWidth: 2,
+                                background: colorByVersion[seg.version],
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

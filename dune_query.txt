@@ -1,23 +1,40 @@
+WITH target AS (
+  SELECT {{token_address}} AS addr
+),
+base AS (
+  SELECT
+    t.blockchain,
+    t.project,
+    t.version,
+    t.block_date,
+    CASE
+      WHEN t.token_bought_address = target.addr THEN t.token_sold_address
+      ELSE t.token_bought_address
+    END AS paired_token_address,
+    t.amount_usd
+  FROM dex.trades t, target
+  WHERE
+    t.blockchain = '{{chain}}'
+    AND t.block_date >= DATE '{{date}}'
+    AND (
+      t.token_bought_address = target.addr
+      OR t.token_sold_address = target.addr
+    )
+)
 SELECT
   blockchain,
   project,
   version,
   block_date,
+  '0x' || TO_HEX(paired_token_address) AS paired_token_address,
   SUM(amount_usd) AS total_amount_usd
-FROM dex.trades
-WHERE
-  blockchain = '{{chain}}'
-  AND block_date >= TRY_CAST('{{date}}' AS DATE)
-  AND (
-    (token_bought_address = FROM_HEX(REPLACE('{{token_a_address}}', '0x', '')) AND token_sold_address = FROM_HEX(REPLACE('{{token_b_address}}', '0x', '')))
-    OR
-    (token_sold_address   = FROM_HEX(REPLACE('{{token_a_address}}', '0x', '')) AND token_bought_address = FROM_HEX(REPLACE('{{token_b_address}}', '0x', '')))
-  )
+FROM base
 GROUP BY
   blockchain,
   project,
   version,
-  block_date
+  block_date,
+  paired_token_address
 ORDER BY
-  block_date DESC,
-  total_amount_usd DESC
+  total_amount_usd DESC,
+  block_date DESC
