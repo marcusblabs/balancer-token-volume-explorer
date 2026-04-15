@@ -1,6 +1,6 @@
 # Dune Query Runner
 
-A React app that lets you select a chain and token from dropdowns, then execute a saved Dune query via the Dune API and display results inline — no copy-pasting SQL required.
+A React app that lets you select a chain and token, then execute a saved Dune query via the Dune API and display results inline — no copy-pasting SQL required.
 
 ## Project Structure
 
@@ -14,8 +14,7 @@ dune-query-runner/
 │   │   └── useTokenRegistry.js ← RPC token name/symbol resolver
 │   ├── components/
 │   │   ├── ResultsTable.jsx   ← Paginated results table
-│   │   ├── TokenRegistry.jsx  ← Registry management UI
-│   │   ├── TokenSelect.jsx    ← Type-ahead token selector
+│   │   ├── TokenSelect.jsx    ← Type-ahead token selector with address lookup
 │   │   └── ProjectVersionChart.jsx ← Volume chart by project/version
 │   ├── App.jsx                ← Main app / controls
 │   └── main.jsx
@@ -71,16 +70,26 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Adding Tokens
 
-Token names and symbols are fetched automatically from the chain's RPC — only addresses need to be stored. Edit `src/data/tokens.js` to add addresses to the dropdown permanently, or use the **Token Registry** tab in the UI to add them at runtime (note: runtime additions reset on page refresh — edit the file to persist them).
+Token names and symbols are fetched automatically from the chain's RPC — you only ever need to store addresses.
+
+### Ad-hoc lookup (no config needed)
+
+Paste any contract address directly into the Token search field. A **Lookup `0x...`** row appears in the dropdown — click it or press Enter and the app resolves the token's name and symbol from the RPC on the fly, adds it to the selector, and selects it automatically. The resolved token stays available for the rest of the session.
+
+Use this for one-off queries or tokens you don't need again after the session.
+
+### Persisting tokens in the registry
+
+If you query a token regularly, add its address to `src/data/tokens.js` so it always appears in the dropdown without a lookup step:
 
 ```js
 // src/data/tokens.js
 export const TOKEN_ADDRESSES = {
   ethereum: [
     '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-    // add more...
+    // add more addresses here...
   ],
-  // add more chains...
+  // other chains...
 }
 ```
 
