@@ -11,6 +11,7 @@ import PerAddressVolumeChart from './components/PerAddressVolumeChart'
 import BufferActivityPanel from './components/BufferActivityPanel'
 import SourceBreakdownChart from './components/SourceBreakdownChart'
 import SourceBreakdownTable from './components/SourceBreakdownTable'
+import ApiKeyPanel from './components/ApiKeyPanel'
 
 const VOLUME_QUERY_ID = (import.meta.env.VITE_DUNE_VOLUME_QUERY_ID ?? '').trim()
 const SOURCE_QUERY_ID = (import.meta.env.VITE_DUNE_SOURCE_QUERY_ID ?? '').trim()
@@ -303,6 +304,8 @@ export default function App() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, animation: 'fadeUp .3s ease' }}>
+          <ApiKeyPanel />
+
           <div style={{ background: '#f4f7fc', border: '1px solid #c4cfde', borderRadius: 12, padding: 20 }}>
             <div className="query-grid" style={{ display: 'grid', gap: 12 }}>
               <Field label="Chain">

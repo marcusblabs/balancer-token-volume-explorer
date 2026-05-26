@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
+import { getDuneApiKey } from '../lib/duneApiKey'
 
-const API_KEY   = import.meta.env.VITE_DUNE_API_KEY
 const BASE_URL  = 'https://api.dune.com/api/v1'
 const POLL_MS   = 1500
 const MAX_POLLS = 60 // 90 second timeout
@@ -26,7 +26,7 @@ export const STATUS = {
 
 function duneHeaders() {
   return {
-    'x-dune-api-key': API_KEY,
+    'x-dune-api-key': getDuneApiKey(),
     'Content-Type': 'application/json',
   }
 }
@@ -59,8 +59,9 @@ export function useDuneQuery(defaultQueryId = ENV_QUERY_ID) {
   }, [])
 
   const run = useCallback(async (input = {}) => {
-    if (!API_KEY || API_KEY === 'your_api_key_here') {
-      setError('No API key found. Add VITE_DUNE_API_KEY to your .env file.')
+    const apiKey = getDuneApiKey()
+    if (!apiKey) {
+      setError('No Dune API key set. Click "Add your Dune API key" above to paste one.')
       setStatus(STATUS.ERROR)
       return
     }
