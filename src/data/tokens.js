@@ -23,6 +23,7 @@ export const TOKEN_ADDRESSES = {
   base: [
     "0x4200000000000000000000000000000000000006",
     "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
     "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22",
     "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
     "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
@@ -66,6 +67,17 @@ export const TOKEN_ADDRESSES = {
     "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
     "0xe9c082921dc3564e10196c5cc15db1250ac7d5c6",
   ],
+  gnosis: [
+    "0x6a023ccd1ff6f2045c3309768ead9e68f978f6e1",
+    "0x8e5bbbb09ed1ebde8674cda39a0c169401db4252",
+    "0x2a22f9c3b484c3629090feed35f17ff8f88f76f0",
+  ],
+  avalanche_c: [
+    "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+    "0x49d5c2bdffac6ce2bfdb6640f4f80f226bc10bab",
+    "0x0555e30da8f98308edb960aa94c0db47230d2b9c",
+    "0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7",
+  ],
 };
 
 export const CHAIN_LABELS = {
@@ -76,6 +88,8 @@ export const CHAIN_LABELS = {
   polygon: "Polygon",
   hyperevm: "Hyperevm",
   monad: "Monad",
+  gnosis: "Gnosis",
+  avalanche_c: "Avalanche",
 };
 
 export const CHAINS = Object.keys(TOKEN_ADDRESSES);
@@ -85,7 +99,9 @@ export const DEFAULT_RPCS = {
   base: "https://base-rpc.publicnode.com",
   arbitrum: "https://arbitrum-one-rpc.publicnode.com",
   optimism: "https://optimism-rpc.publicnode.com",
-  polygon: "https://polygon-bor-rpc.publicnode.com",
-  hyperevm: "https://rpc.hyperliquid.xyz/evm",
-  monad: "https://monad-mainnet.drpc.org",
+  polygon: "https://polygon.drpc.org",
+  hyperevm: "https://rpc.hypurrscan.io",
+  monad: "https://rpc.monad.xyz",
+  gnosis: "https://gnosis-rpc.publicnode.com",
+  avalanche_c: "https://avalanche-c-chain-rpc.publicnode.com",
 };

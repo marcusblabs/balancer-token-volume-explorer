@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { STATUS } from '../hooks/useDuneQuery'
 import ProjectVersionChart from './ProjectVersionChart'
+import TokenPairChart from './TokenPairChart'
 
-const PRIORITY_COLS = ['project', 'version', 'block_date', 'total_amount_usd', 'blockchain']
+const PRIORITY_COLS = ['project', 'version', 'block_date', 'total_amount_usd', 'pool_address', 'blockchain']
 
 function formatNumber(val) {
   const n = Number(val)
@@ -31,18 +32,43 @@ const S = {
   },
 }
 
-export default function ResultsTable({ status, rows, columns, error, meta, executionId, onCancel, registry }) {
+export default function ResultsTable({ status, rows, columns, error, meta, executionId, onCancel, registry, queriedToken }) {
   const [page, setPage] = useState(0)
   const [showGrid, setShowGrid] = useState(false)
+  const [sortCol, setSortCol] = useState(null)
+  const [sortDir, setSortDir] = useState('desc')
   const PAGE_SIZE = 50
 
   useEffect(() => {
     setPage(0)
     setShowGrid(false)
+    setSortCol(null)
   }, [rows])
 
-  const totalPages = Math.ceil(rows.length / PAGE_SIZE)
-  const pageRows = rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+  const sortedRows = useMemo(() => {
+    if (!sortCol) return rows
+    return [...rows].sort((a, b) => {
+      const av = a[sortCol], bv = b[sortCol]
+      const an = Number(av), bn = Number(bv)
+      const cmp = Number.isFinite(an) && Number.isFinite(bn)
+        ? an - bn
+        : String(av ?? '').localeCompare(String(bv ?? ''))
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+  }, [rows, sortCol, sortDir])
+
+  const totalPages = Math.ceil(sortedRows.length / PAGE_SIZE)
+  const pageRows = sortedRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+
+  function handleSort(col) {
+    if (sortCol === col) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortCol(col)
+      setSortDir('desc')
+    }
+    setPage(0)
+  }
 
   const sortedCols = useMemo(() => {
     if (!columns?.length) return columns
@@ -161,7 +187,8 @@ export default function ResultsTable({ status, rows, columns, error, meta, execu
       </div>
 
       <div style={{ padding: 12 }}>
-        <ProjectVersionChart rows={rows} registry={registry} />
+        <ProjectVersionChart rows={rows} registry={registry} queriedToken={queriedToken} />
+        <TokenPairChart rows={rows} registry={registry} queriedToken={queriedToken} />
 
         <div style={{ marginTop: 12, border: '1px solid #c4cfde', borderRadius: 10, overflow: 'hidden', background: '#f7f9fd' }}>
           <button
@@ -183,7 +210,7 @@ export default function ResultsTable({ status, rows, columns, error, meta, execu
               letterSpacing: '.06em',
             }}
           >
-            <span>Detailed Grid</span>
+            <span>Detailed Grid{queriedToken?.symbol ? ` — ${queriedToken.symbol}` : ''}</span>
             <span>{showGrid ? 'Hide' : 'Show'}</span>
           </button>
 
@@ -196,9 +223,10 @@ export default function ResultsTable({ status, rows, columns, error, meta, execu
                       {sortedCols.map((col) => (
                         <th
                           key={col}
+                          onClick={() => handleSort(col)}
                           style={{
                             ...S.cell,
-                            color: '#5c6b7d',
+                            color: sortCol === col ? '#365fd9' : '#5c6b7d',
                             fontWeight: 400,
                             fontSize: 10,
                             textTransform: 'uppercase',
@@ -207,9 +235,11 @@ export default function ResultsTable({ status, rows, columns, error, meta, execu
                             position: 'sticky',
                             top: 0,
                             zIndex: 1,
+                            cursor: 'pointer',
+                            userSelect: 'none',
                           }}
                         >
-                          {col}
+                          {col}{sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
                         </th>
                       ))}
                     </tr>
@@ -229,7 +259,9 @@ export default function ResultsTable({ status, rows, columns, error, meta, execu
                                     ? '#2f8f5b'
                                     : col === 'total_amount_usd'
                                       ? '#223349'
-                                      : '#5f6f84',
+                                      : col === 'pool_address'
+                                        ? '#7a5af8'
+                                        : '#5f6f84',
                             }}
                           >
                             {formatCell(col, row[col])}

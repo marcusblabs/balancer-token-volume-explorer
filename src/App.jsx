@@ -56,6 +56,7 @@ export default function App() {
   }, [chain, tokens, loading])
 
   const { status, rows, columns, error, executionId, meta, run, cancel } = useDuneQuery()
+  const [queriedToken, setQueriedToken] = useState(null)
 
   // Collect unique paired token addresses from query results and resolve via RPC
   const pairedAddresses = useMemo(() => {
@@ -140,6 +141,7 @@ export default function App() {
 
   const handleRun = () => {
     if (invalid || isRunning) return
+    setQueriedToken(tokenA)
     run({ chain, tokenA, date })
   }
 
@@ -293,6 +295,7 @@ export default function App() {
             executionId={executionId}
             onCancel={cancel}
             registry={resolvedRegistry}
+            queriedToken={queriedToken}
           />
         </div>
       </div>

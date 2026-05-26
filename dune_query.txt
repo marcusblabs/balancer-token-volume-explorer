@@ -7,6 +7,7 @@ base AS (
     t.project,
     t.version,
     t.block_date,
+    t.project_contract_address,
     CASE
       WHEN t.token_bought_address = target.addr THEN t.token_sold_address
       ELSE t.token_bought_address
@@ -26,6 +27,7 @@ SELECT
   project,
   version,
   block_date,
+  '0x' || TO_HEX(project_contract_address) AS pool_address,
   '0x' || TO_HEX(paired_token_address) AS paired_token_address,
   SUM(amount_usd) AS total_amount_usd
 FROM base
@@ -34,6 +36,7 @@ GROUP BY
   project,
   version,
   block_date,
+  project_contract_address,
   paired_token_address
 ORDER BY
   total_amount_usd DESC,
