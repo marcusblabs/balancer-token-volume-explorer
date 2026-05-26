@@ -1,9 +1,19 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { TOKEN_ADDRESSES, CHAIN_LABELS, CHAINS, DEFAULT_RPCS } from './data/tokens'
 import { useDuneQuery, STATUS } from './hooks/useDuneQuery'
 import { useTokenRegistry, fetchTokenMeta, metaCache, addressFallback } from './hooks/useTokenRegistry'
+import { useBalancerAddressExpansion } from './hooks/useBalancerAddressExpansion'
+import { useBalancerWrapperResolver } from './hooks/useBalancerWrapperResolver'
 import ResultsTable from './components/ResultsTable'
 import TokenSelect from './components/TokenSelect'
+import AddressExpansionPanel from './components/AddressExpansionPanel'
+import PerAddressVolumeChart from './components/PerAddressVolumeChart'
+import BufferActivityPanel from './components/BufferActivityPanel'
+import SourceBreakdownChart from './components/SourceBreakdownChart'
+import SourceBreakdownTable from './components/SourceBreakdownTable'
+
+const VOLUME_QUERY_ID = (import.meta.env.VITE_DUNE_VOLUME_QUERY_ID ?? '').trim()
+const SOURCE_QUERY_ID = (import.meta.env.VITE_DUNE_SOURCE_QUERY_ID ?? '').trim()
 
 const sel = {
   background: '#f7f9fd',
@@ -29,25 +39,42 @@ function getLocalDateInputValue(offsetDays = 0) {
   return `${y}-${m}-${day}`
 }
 
+const lower = (s) => (typeof s === 'string' ? s.toLowerCase() : s)
+
+function readBool(key, fallback) {
+  try {
+    const v = sessionStorage.getItem(key)
+    if (v === null) return fallback
+    return v === 'true'
+  } catch {
+    return fallback
+  }
+}
+function writeBool(key, value) {
+  try { sessionStorage.setItem(key, String(value)) } catch { /* noop */ }
+}
+
 export default function App() {
   const [chain, setChain] = useState('ethereum')
   const [tokenAIdx, setTokenAIdx] = useState(0)
-  const [date, setDate] = useState(() => getLocalDateInputValue(-1))
+  const [date, setDate] = useState(() => getLocalDateInputValue(-7))
 
-  // Extra addresses entered manually by the user (per-chain)
-  const [customAddresses, setCustomAddresses] = useState({}) // { [chain]: [address, ...] }
+  const [customAddresses, setCustomAddresses] = useState({})
   const [lookupLoading, setLookupLoading] = useState(false)
   const [lookupError, setLookupError] = useState(null)
+
+  // Header toggles, both persisted in sessionStorage.
+  const [unwrapPaired, setUnwrapPaired] = useState(() => readBool('flag.unwrapPaired', true))
+  const [includeBuffer, setIncludeBuffer] = useState(() => readBool('flag.includeBuffer', false))
+  useEffect(() => writeBool('flag.unwrapPaired', unwrapPaired), [unwrapPaired])
+  useEffect(() => writeBool('flag.includeBuffer', includeBuffer), [includeBuffer])
 
   const chainAddresses = useMemo(() => [
     ...TOKEN_ADDRESSES[chain],
     ...(customAddresses[chain] ?? []),
   ], [chain, customAddresses])
 
-  // Resolved tokens (symbol + name) for the currently selected chain
   const { tokens, loading } = useTokenRegistry(chain, chainAddresses)
-
-  // Accumulate resolved tokens by chain for chart lookups
   const [resolvedRegistry, setResolvedRegistry] = useState({})
   useEffect(() => {
     if (tokens.length > 0 && !loading) {
@@ -55,27 +82,50 @@ export default function App() {
     }
   }, [chain, tokens, loading])
 
-  const { status, rows, columns, error, executionId, meta, run, cancel } = useDuneQuery()
+  // Pick selected token from registry.
+  const safeA = Math.min(tokenAIdx, tokens.length - 1)
+  const tokenA = tokens[safeA]
+  const invalid = !tokenA || loading
+
+  // ── Balancer wrapper expansion (Phase 1 hook) ─────────────────────────────
+  const { data: expansion, loading: expansionLoading, error: expansionError } =
+    useBalancerAddressExpansion(chain, tokenA?.address ?? null)
+
+  const expandedCount = expansion?.expandedAddresses?.length ?? 0
+
+  // ── Volume + source queries (Phase 2 + 4) ─────────────────────────────────
+  const volumeQuery = useDuneQuery(VOLUME_QUERY_ID || undefined)
+  const sourceQuery = useDuneQuery(SOURCE_QUERY_ID || undefined)
+
   const [queriedToken, setQueriedToken] = useState(null)
+  const [runStamp, setRunStamp] = useState(0)
 
-  // Collect unique paired token addresses from query results and resolve via RPC
+  const isRunning = useMemo(() => {
+    const r = (s) => s === STATUS.EXECUTING || s === STATUS.POLLING
+    return r(volumeQuery.status) || r(sourceQuery.status)
+  }, [volumeQuery.status, sourceQuery.status])
+
+  // Wrapper resolver: input is the union of expanded addresses AND every
+  // paired address that came back in volume rows.
   const pairedAddresses = useMemo(() => {
-    if (!rows?.length) return []
-    const seen = new Set()
-    const result = []
-    for (const row of rows) {
-      const addr = row.paired_token_address
-      if (addr?.startsWith('0x') && !seen.has(addr.toLowerCase())) {
-        seen.add(addr.toLowerCase())
-        result.push(addr)
-      }
+    const set = new Set()
+    for (const r of volumeQuery.rows ?? []) {
+      const a = r.paired_token_address
+      if (typeof a === 'string' && a.startsWith('0x')) set.add(a.toLowerCase())
     }
-    return result
-  }, [rows])
+    return [...set]
+  }, [volumeQuery.rows])
 
-  const { tokens: pairedTokens, loading: pairedLoading } = useTokenRegistry(chain, pairedAddresses)
+  const resolverInput = useMemo(() => {
+    const set = new Set(pairedAddresses)
+    for (const e of expansion?.expandedAddresses ?? []) set.add(lower(e.address))
+    return [...set]
+  }, [pairedAddresses, expansion])
 
-  // Merge resolved paired tokens into the registry for chart lookups
+  const wrapperResolver = useBalancerWrapperResolver(chain, resolverInput)
+
+  // Resolve paired tokens to readable symbols for the existing registry display.
+  const { tokens: pairedTokens } = useTokenRegistry(chain, pairedAddresses)
   useEffect(() => {
     if (!pairedTokens.length) return
     setResolvedRegistry((prev) => {
@@ -91,16 +141,59 @@ export default function App() {
     })
   }, [chain, pairedTokens])
 
-  const safeA = Math.min(tokenAIdx, tokens.length - 1)
-  const tokenA = tokens[safeA]
-  const invalid = !tokenA || loading
+  // ── Post-process rows: paired_display + is_buffer_op + filter ─────────────
+  const wrapperMap = wrapperResolver.data
 
-  const isRunning = status === STATUS.EXECUTING || status === STATUS.POLLING
+  const enrichRow = (r) => {
+    const queriedAddr = lower(r.queried_token_address ?? '')
+    const pairedAddr = lower(r.paired_token_address ?? '')
+    const pairedWrap = wrapperMap?.get(pairedAddr)
+    const queriedWrap = wrapperMap?.get(queriedAddr)
+    const pairedUnderlying = pairedWrap?.underlyingAddress ?? pairedAddr
+    const queriedUnderlying = queriedWrap?.underlyingAddress ?? queriedAddr
+    const isBufferOp = !!(pairedUnderlying && queriedUnderlying && pairedUnderlying === queriedUnderlying)
+    let pairedDisplay
+    if (pairedWrap && unwrapPaired) {
+      pairedDisplay = `${pairedWrap.underlyingSymbol} (was ${pairedWrap.wrapperSymbol})`
+    } else if (pairedAddr) {
+      // Fall back to TokenSelect registry lookup for a readable symbol.
+      const fromRegistry = (resolvedRegistry[chain] ?? []).find((t) => t.address.toLowerCase() === pairedAddr)
+      pairedDisplay = fromRegistry?.symbol ?? pairedAddr
+    } else {
+      pairedDisplay = '—'
+    }
+    return { ...r, paired_display: pairedDisplay, is_buffer_op: isBufferOp }
+  }
 
+  const enrichedVolumeRows = useMemo(
+    () => (volumeQuery.rows ?? []).map(enrichRow),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [volumeQuery.rows, wrapperMap, unwrapPaired, resolvedRegistry, chain],
+  )
+
+  const headlineRows = useMemo(
+    () => (includeBuffer ? enrichedVolumeRows : enrichedVolumeRows.filter((r) => !r.is_buffer_op)),
+    [enrichedVolumeRows, includeBuffer],
+  )
+
+  const bufferRows = useMemo(
+    () => enrichedVolumeRows.filter((r) => r.is_buffer_op),
+    [enrichedVolumeRows],
+  )
+
+  const headlineColumns = useMemo(
+    () => [
+      ...(volumeQuery.columns ?? []),
+      ...((volumeQuery.columns ?? []).includes('paired_display') ? [] : ['paired_display']),
+      ...((volumeQuery.columns ?? []).includes('is_buffer_op') ? [] : ['is_buffer_op']),
+    ],
+    [volumeQuery.columns],
+  )
+
+  // ── Lookup-address handler (unchanged from base repo) ─────────────────────
   const handleLookupAddress = async (address) => {
-    const lower = address.toLowerCase()
-    // Already in the list — just select it
-    const existing = tokens.findIndex((t) => t.address.toLowerCase() === lower)
+    const lowerAddr = address.toLowerCase()
+    const existing = tokens.findIndex((t) => t.address.toLowerCase() === lowerAddr)
     if (existing !== -1) {
       setTokenAIdx(existing)
       return
@@ -109,19 +202,17 @@ export default function App() {
     setLookupError(null)
     try {
       const rpcUrl = DEFAULT_RPCS[chain]
-      if (!metaCache.has(lower)) {
+      if (!metaCache.has(lowerAddr)) {
         const meta = await fetchTokenMeta(address, rpcUrl)
-        if (meta) metaCache.set(lower, meta)
-        else metaCache.set(lower, addressFallback(address))
+        if (meta) metaCache.set(lowerAddr, meta)
+        else metaCache.set(lowerAddr, addressFallback(address))
       }
       setCustomAddresses((prev) => {
         const list = prev[chain] ?? []
-        if (list.some((a) => a.toLowerCase() === lower)) return prev
+        if (list.some((a) => a.toLowerCase() === lowerAddr)) return prev
         return { ...prev, [chain]: [...list, address] }
       })
-      // The new address will appear at the end; select it after tokens update
-      // We store the target so the effect below can pick it up
-      setPendingSelect(lower)
+      setPendingSelect(lowerAddr)
     } catch (err) {
       setLookupError(`Could not resolve ${address}: ${err.message}`)
     } finally {
@@ -139,10 +230,26 @@ export default function App() {
     }
   }, [pendingSelect, tokens, loading])
 
+  // ── Run handler — fires both Dune queries with the expanded address set ──
   const handleRun = () => {
     if (invalid || isRunning) return
     setQueriedToken(tokenA)
-    run({ chain, tokenA, date })
+    setRunStamp((s) => s + 1)
+    const expandedAddresses = expansion?.expandedAddresses?.length
+      ? expansion.expandedAddresses.map((e) => e.address.toLowerCase())
+      : [tokenA.address.toLowerCase()]
+    const params = {
+      chain,
+      token_addresses: expandedAddresses.join(','),
+      date,
+    }
+    if (VOLUME_QUERY_ID) volumeQuery.run({ queryId: VOLUME_QUERY_ID, params })
+    if (SOURCE_QUERY_ID) sourceQuery.run({ queryId: SOURCE_QUERY_ID, params })
+  }
+
+  const handleCancel = () => {
+    volumeQuery.cancel()
+    sourceQuery.cancel()
   }
 
   const handleChainChange = (c) => {
@@ -179,50 +286,32 @@ export default function App() {
         }
       `}</style>
 
-      <div style={{ maxWidth: 980, margin: '0 auto', padding: '36px 24px' }}>
-        <div style={{ marginBottom: 28, animation: 'fadeUp .4s ease' }}>
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '36px 24px' }}>
+        <div style={{ marginBottom: 24, animation: 'fadeUp .4s ease' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
             <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
               <circle cx="9" cy="9" r="8" stroke="#365fd9" strokeWidth="1.5" />
               <path d="M5 9h8M9 5v8" stroke="#365fd9" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
-            <span
-              style={{
-                fontFamily: "'Syne', sans-serif",
-                fontSize: 22,
-                fontWeight: 800,
-                color: '#1f314a',
-                letterSpacing: '-0.02em',
-              }}
-            >
-              Dune Query Runner
+            <span style={{ fontFamily: "'Syne', sans-serif", fontSize: 22, fontWeight: 800, color: '#1f314a', letterSpacing: '-0.02em' }}>
+              Token Volume Explorer — Balancer Wrapper Expansion
             </span>
           </div>
           <p style={{ fontSize: 12, color: '#5c6b7d', margin: 0, paddingLeft: 30 }}>
-            Select chain + token, run query against Dune API, view top pairs by volume inline
+            Pick chain + token. The app expands to all Balancer-registered wrappers, queries DEX volume across the set, and attributes by source.
           </p>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, animation: 'fadeUp .3s ease' }}>
-          <div
-            style={{
-              background: '#f4f7fc',
-              border: '1px solid #c4cfde',
-              borderRadius: 12,
-              padding: 20,
-            }}
-          >
+          <div style={{ background: '#f4f7fc', border: '1px solid #c4cfde', borderRadius: 12, padding: 20 }}>
             <div className="query-grid" style={{ display: 'grid', gap: 12 }}>
               <Field label="Chain">
                 <select style={sel} value={chain} onChange={(e) => handleChainChange(e.target.value)}>
                   {CHAINS.map((c) => (
-                    <option key={c} value={c}>
-                      {CHAIN_LABELS[c]}
-                    </option>
+                    <option key={c} value={c}>{CHAIN_LABELS[c]}</option>
                   ))}
                 </select>
               </Field>
-
               <Field label="Token">
                 <TokenSelect
                   tokens={tokens}
@@ -237,7 +326,6 @@ export default function App() {
                   <div style={{ marginTop: 4, fontSize: 11, color: '#c0392b' }}>{lookupError}</div>
                 )}
               </Field>
-
               <Field label="Start Date">
                 <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...sel, colorScheme: 'light' }} />
               </Field>
@@ -246,25 +334,14 @@ export default function App() {
             <div style={{ marginTop: 16, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               {!invalid && (
                 <div style={{ display: 'flex', gap: 10, flex: '1 1 560px', minWidth: 0 }}>
-                  <div
-                    style={{
-                      background: '#edf2fa',
-                      border: '1px solid #c6d2e4',
-                      borderRadius: 7,
-                      padding: '6px 12px',
-                      fontSize: 11,
-                      flex: 1,
-                      minWidth: 0,
-                    }}
-                  >
+                  <div style={{ background: '#edf2fa', border: '1px solid #c6d2e4', borderRadius: 7, padding: '6px 12px', fontSize: 11, flex: 1, minWidth: 0 }}>
                     <span style={{ color: '#365fd9', marginRight: 8 }}>{tokenA.symbol}</span>
                     <span style={{ color: '#5c6b7d', wordBreak: 'break-all' }}>{tokenA.address}</span>
                   </div>
                 </div>
               )}
-
               <button
-                onClick={isRunning ? cancel : handleRun}
+                onClick={isRunning ? handleCancel : handleRun}
                 disabled={invalid && !isRunning}
                 style={{
                   background: isRunning ? '#f4ead8' : invalid ? '#e4e8ef' : '#dfe9ff',
@@ -286,21 +363,60 @@ export default function App() {
             </div>
           </div>
 
+          {/* Header controls — toggles persisted in sessionStorage */}
+          <div style={{
+            display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap',
+            background: '#edf2fa', border: '1px solid #c4cfde', borderRadius: 12, padding: '10px 16px',
+          }}>
+            <Toggle
+              checked={unwrapPaired}
+              onChange={setUnwrapPaired}
+              label="Un-wrap paired tokens"
+              hint="When a paired token is a Balancer wrapper, show its underlying."
+            />
+            <Toggle
+              checked={includeBuffer}
+              onChange={setIncludeBuffer}
+              label="Include buffer wraps in totals"
+              hint="When off, rows whose two sides resolve to the same underlying are excluded from headline aggregates."
+            />
+          </div>
+
+          <AddressExpansionPanel chain={chain} expansion={expansion} loading={expansionLoading} error={expansionError} />
+
+          <PerAddressVolumeChart rows={headlineRows} expansion={expansion} />
+
+          <BufferActivityPanel rows={bufferRows} wrapperMap={wrapperMap} />
+
           <ResultsTable
-            status={status}
-            rows={rows}
-            columns={columns}
-            error={error}
-            meta={meta}
-            executionId={executionId}
-            onCancel={cancel}
+            status={volumeQuery.status}
+            rows={headlineRows}
+            columns={headlineColumns}
+            error={volumeQuery.error}
+            meta={volumeQuery.meta}
+            executionId={volumeQuery.executionId}
+            onCancel={handleCancel}
             registry={resolvedRegistry}
             queriedToken={queriedToken}
+            expandedCount={expandedCount}
           />
+
+          {sourceQuery.rows?.length > 0 && (
+            <>
+              <SourceBreakdownChart rows={sourceQuery.rows} />
+              <SourceBreakdownTable rows={sourceQuery.rows} />
+            </>
+          )}
+
+          {!VOLUME_QUERY_ID && (
+            <div style={{ fontSize: 11, color: '#c0392b' }}>
+              VITE_DUNE_VOLUME_QUERY_ID is not set in .env — the new pipeline cannot run.
+            </div>
+          )}
         </div>
       </div>
 
-      {(loading || pairedLoading) && (
+      {(loading || expansionLoading) && (
         <div
           style={{
             position: 'fixed',
@@ -331,7 +447,7 @@ export default function App() {
               flexShrink: 0,
             }}
           />
-          Fetching token names…
+          {expansionLoading ? 'Resolving Balancer wrappers…' : 'Fetching token names…'}
         </div>
       )}
     </div>
@@ -346,5 +462,20 @@ function Field({ label, children }) {
       </div>
       {children}
     </div>
+  )
+}
+
+function Toggle({ checked, onChange, label, hint }) {
+  return (
+    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ accentColor: '#365fd9' }}
+      />
+      <span style={{ fontSize: 12, color: '#243447' }}>{label}</span>
+      {hint && <span style={{ fontSize: 10, color: '#8a9ab0' }} title={hint}>ⓘ</span>}
+    </label>
   )
 }

@@ -93,7 +93,7 @@ function truncateAddress(addr) {
   return `${addr.slice(0, 8)}...${addr.slice(-6)}`
 }
 
-export default function ProjectVersionChart({ rows, registry, queriedToken }) {
+export default function ProjectVersionChart({ rows, registry, queriedToken, expandedCount }) {
   const { projects, versions, colorByVersion, maxTotal } = useMemo(() => buildSeries(rows), [rows])
   const [expanded, setExpanded] = useState(null)
 
@@ -116,6 +116,11 @@ export default function ProjectVersionChart({ rows, registry, queriedToken }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 10 }}>
         <span style={{ fontSize: 11, color: '#5c6b7d', textTransform: 'uppercase', letterSpacing: '.08em' }}>
           Project Volume by Version{queriedToken?.symbol ? ` — ${queriedToken.symbol}` : ''}
+          {expandedCount && expandedCount > 1 ? (
+            <span style={{ marginLeft: 8, color: '#365fd9', textTransform: 'none', letterSpacing: 0, fontSize: 10 }}>
+              · Aggregated across {expandedCount} addresses
+            </span>
+          ) : null}
         </span>
         <span style={{ fontSize: 11, color: '#5c6b7d' }}>{projects.length} projects</span>
       </div>

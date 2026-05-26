@@ -3,7 +3,11 @@ import { STATUS } from '../hooks/useDuneQuery'
 import ProjectVersionChart from './ProjectVersionChart'
 import TokenPairChart from './TokenPairChart'
 
-const PRIORITY_COLS = ['project', 'version', 'block_date', 'total_amount_usd', 'pool_address', 'blockchain']
+const PRIORITY_COLS = [
+  'project', 'version', 'block_date', 'total_amount_usd',
+  'queried_token_address', 'paired_display', 'is_buffer_op',
+  'pool_address', 'blockchain',
+]
 
 function formatNumber(val) {
   const n = Number(val)
@@ -18,6 +22,7 @@ function formatCell(col, val) {
   if (val === null || val === undefined) return '-'
   if (col === 'total_amount_usd' || col === 'amount_usd') return formatNumber(val)
   if (col === 'block_time') return val?.replace('T', ' ')?.slice(0, 19) ?? val
+  if (col === 'is_buffer_op') return val ? '⚠ buffer' : ''
   return String(val)
 }
 
@@ -32,7 +37,7 @@ const S = {
   },
 }
 
-export default function ResultsTable({ status, rows, columns, error, meta, executionId, onCancel, registry, queriedToken }) {
+export default function ResultsTable({ status, rows, columns, error, meta, executionId, onCancel, registry, queriedToken, expandedCount }) {
   const [page, setPage] = useState(0)
   const [showGrid, setShowGrid] = useState(false)
   const [sortCol, setSortCol] = useState(null)
@@ -187,7 +192,7 @@ export default function ResultsTable({ status, rows, columns, error, meta, execu
       </div>
 
       <div style={{ padding: 12 }}>
-        <ProjectVersionChart rows={rows} registry={registry} queriedToken={queriedToken} />
+        <ProjectVersionChart rows={rows} registry={registry} queriedToken={queriedToken} expandedCount={expandedCount} />
         <TokenPairChart rows={rows} registry={registry} queriedToken={queriedToken} />
 
         <div style={{ marginTop: 12, border: '1px solid #c4cfde', borderRadius: 10, overflow: 'hidden', background: '#f7f9fd' }}>
