@@ -1,6 +1,10 @@
-# Dune Query Runner
+# Token Volume Explorer — Balancer Wrapper Expansion
 
-A React app that lets you select a chain and token, then execute a saved Dune query via the Dune API and display results inline — no copy-pasting SQL required.
+A React app that lets you select a chain and token, expands the input to its
+Balancer wrapper set (every Balancer-registered ERC-4626 wrapper that shares
+an underlying), and runs two saved Dune queries against the expanded address
+set: one for per-pool volume and one for source attribution (aggregators,
+CoW solvers, direct). Built on top of `zekraken-bot/dex_volume`.
 
 ## Project Structure
 
@@ -42,23 +46,49 @@ Edit `.env` and fill in:
 
 ```env
 VITE_DUNE_API_KEY=your_api_key_here
-VITE_DUNE_QUERY_ID=your_query_id_here
+VITE_DUNE_QUERY_ID=6743629
+VITE_DUNE_VOLUME_QUERY_ID=7582218
+VITE_DUNE_SOURCE_QUERY_ID=7582229
 ```
 
 - **API key**: Get from [dune.com/settings/api](https://dune.com/settings/api)
-- **Query ID**: Your saved Dune query ID (numeric)
+- `VITE_DUNE_QUERY_ID` — original single-token saved query. Kept for rollback;
+  the app does not use it on the main pipeline.
+- `VITE_DUNE_VOLUME_QUERY_ID` — multi-address volume-by-pool query
+  (`dune_queries/volume_by_pool.sql`).
+- `VITE_DUNE_SOURCE_QUERY_ID` — source-attribution query
+  (`dune_queries/source_attribution.sql`).
 
-### 3. Use an existing saved query on Dune
+### 3. Dune saved queries
 
-Use a saved Dune query that accepts these exact parameter names:
+Two queries drive the new pipeline. They share three parameters:
 
 | Parameter | Type | Example |
 |---|---|---|
 | `chain` | text | `ethereum` |
-| `token_address` | text | `0xC02aaA39...` |
-| `date` | date | `2024-01-01` |
+| `token_addresses` | text | `0xa0b...eb48,0xd4f...d23e,0xbee...64cb` |
+| `date` | text | `2026-05-19` |
 
-Copy the numeric ID from the URL (`https://dune.com/queries/1234567`) and add it to `.env` as `VITE_DUNE_QUERY_ID`.
+The SQL for both is committed in `dune_queries/`. Re-deploy them as your own
+saved queries (or fork the existing ones at IDs 7582218 / 7582229) and put
+the numeric IDs in `.env`.
+
+### 4. Data flow
+
+1. User picks `(chain, token, date)`.
+2. `useBalancerAddressExpansion` calls Balancer v3 GraphQL
+   (`https://api-v3.balancer.fi/graphql`) to learn whether the input is an
+   ERC-4626 wrapper and to enumerate every sibling wrapper that shares the
+   same underlying. Result: the **expansion set** (usually 1 token for
+   tokens with no Balancer wrappers, up to ~15 for USDC on mainnet).
+3. **Run Query** fires the two Dune saved queries with the expansion
+   addresses joined by commas.
+4. `useBalancerWrapperResolver` resolves every paired-side address that
+   came back to its underlying, so paired-token columns can render as the
+   underlying symbol (toggleable).
+5. Each row is enriched with `paired_display` and `is_buffer_op`. Buffer-op
+   rows (queried + paired resolve to the same underlying) are excluded from
+   headline aggregates by default and surfaced in the BufferActivityPanel.
 
 ### 4. Run
 
@@ -107,3 +137,13 @@ The chain name must match what Dune uses in the `blockchain` column (lowercase: 
 - The Dune API does support browser requests (CORS is allowed) with the `x-dune-api-key` header
 - Your API key is loaded from `.env` at build time via Vite — never commit `.env` to git (it's in `.gitignore`)
 - Token metadata is fetched from public RPC nodes (publicnode.com) and cached in memory for the session
+
+## Scope of "wrapper expansion"
+
+Only **Balancer-registered ERC-4626 wrappers** count. Aave / Compound /
+Yearn / Pendle wrappers that are not in Balancer's token index are
+ignored. This matches the actual problem the expansion solves: undercounted
+Balancer boosted-pool volume that comes through wrappers. See `DISCOVERY.md`
+for the data-layer nuances (`dex.trades` already substitutes the underlying
+for the Aave family, so the incremental volume comes mostly from non-Aave
+wrappers like `syrupUSDC`, `steakUSDC`, `gtusdcp`, …).
