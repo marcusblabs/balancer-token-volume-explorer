@@ -9,12 +9,15 @@ function fmtUsd(n) {
 }
 
 const FILTERS = [
-  { id: 'all', label: 'All' },
+  { id: 'all',        label: 'All' },
   { id: 'aggregator', label: 'Aggregators' },
   { id: 'cow_solver', label: 'CoW solvers' },
-  { id: 'direct', label: 'Direct' },
 ]
 
+/**
+ * Per-aggregator / per-CoW-solver table. Reads rows in the Phase-4-v2
+ * shape (no `project`/`pool_address` columns).
+ */
 export default function SourceBreakdownTable({ rows }) {
   const [filter, setFilter] = useState('all')
 
@@ -22,12 +25,10 @@ export default function SourceBreakdownTable({ rows }) {
     const map = new Map()
     for (const r of rows ?? []) {
       if (filter !== 'all' && r.source_category !== filter) continue
-      const key = `${r.source_category}::${r.source_name}::${r.project ?? ''}::${r.version ?? ''}`
+      const key = `${r.source_category}::${r.source_name}`
       const cur = map.get(key) ?? {
         source_category: r.source_category,
         source_name: r.source_name,
-        project: r.project,
-        version: r.version,
         usd: 0,
         count: 0,
       }
@@ -38,15 +39,17 @@ export default function SourceBreakdownTable({ rows }) {
     return [...map.values()].sort((a, b) => b.usd - a.usd)
   }, [rows, filter])
 
+  const total = aggregated.reduce((a, b) => a + b.usd, 0)
+
   return (
     <div style={{ background: '#f4f7fc', border: '1px solid #c4cfde', borderRadius: 12, padding: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginBottom: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
         <div>
           <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 14, fontWeight: 800, color: '#1f314a' }}>
             Source breakdown (table)
           </div>
           <div style={{ fontSize: 11, color: '#5c6b7d' }}>
-            {aggregated.length} row{aggregated.length === 1 ? '' : 's'}
+            {aggregated.length} source{aggregated.length === 1 ? '' : 's'} · total {fmtUsd(total)}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
@@ -76,9 +79,9 @@ export default function SourceBreakdownTable({ rows }) {
             <tr>
               <th style={th}>Category</th>
               <th style={th}>Source</th>
-              <th style={th}>DEX</th>
               <th style={{ ...th, textAlign: 'right' }}>USD</th>
               <th style={{ ...th, textAlign: 'right' }}>Trades</th>
+              <th style={{ ...th, textAlign: 'right' }}>Share</th>
             </tr>
           </thead>
           <tbody>
@@ -86,9 +89,11 @@ export default function SourceBreakdownTable({ rows }) {
               <tr key={i}>
                 <td style={td}>{r.source_category}</td>
                 <td style={td}><strong>{r.source_name}</strong></td>
-                <td style={td}>{r.project} v{r.version}</td>
                 <td style={{ ...td, textAlign: 'right', fontFamily: "'JetBrains Mono', monospace" }}>{fmtUsd(r.usd)}</td>
-                <td style={{ ...td, textAlign: 'right' }}>{r.count}</td>
+                <td style={{ ...td, textAlign: 'right' }}>{r.count.toLocaleString()}</td>
+                <td style={{ ...td, textAlign: 'right', color: '#5c6b7d' }}>
+                  {total > 0 ? `${((r.usd / total) * 100).toFixed(1)}%` : '—'}
+                </td>
               </tr>
             ))}
           </tbody>

@@ -115,7 +115,7 @@ export default function ProjectVersionChart({ rows, registry, queriedToken, expa
     <div style={{ border: '1px solid #c4cfde', borderRadius: 10, background: '#f7f9fd', padding: 14 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 10 }}>
         <span style={{ fontSize: 11, color: '#5c6b7d', textTransform: 'uppercase', letterSpacing: '.08em' }}>
-          Project Volume by Version{queriedToken?.symbol ? ` — ${queriedToken.symbol}` : ''}
+          Volume by DEX (where the swap settled){queriedToken?.symbol ? ` — ${queriedToken.symbol}` : ''}
           {expandedCount && expandedCount > 1 ? (
             <span style={{ marginLeft: 8, color: '#365fd9', textTransform: 'none', letterSpacing: 0, fontSize: 10 }}>
               · Aggregated across {expandedCount} addresses

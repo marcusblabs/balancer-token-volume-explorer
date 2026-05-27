@@ -1,128 +1,131 @@
--- Source-attribution query.
+-- Source-attribution query: per-aggregator and per-CoW-solver volume for an
+-- expanded address set. Reads directly from the source-of-truth tables for
+-- each routing surface, rather than left-joining dex.trades.
 --
--- Returns per-pool, per-day, per-queried-address volume, broken down by
--- attribution source: aggregator (1inch / Velora / 0x / KyberSwap / Odos /
--- Bebop / cow_protocol / tokenlon / DODO X / bitget / sushi-as-aggregator /
--- etc.), CoW solver (when settled via the CoW batch auction), or direct
--- (no router / no settlement match).
+--   * dex_aggregator.trades — one row per aggregator route. project ∈
+--     {1inch, 0x API, kyberswap, cow_protocol, velora (Paraswap), bebop,
+--      odos, bitget_dex_aggregator, sushiswap, tokenlon, DODO X, lifi, …}.
+--   * cow_protocol_<chain>.trades — one row per CoW order fill. Joined to
+--     batches → solvers for the human-readable solver name. CoW rows are
+--     ALSO present in dex_aggregator.trades with project='cow_protocol';
+--     we exclude that branch below to avoid double-counting and keep the
+--     fine-grained per-solver attribution.
+--
+-- Output is grouped by (blockchain, source_category, source_name, version,
+-- block_date, queried_token_address). Pool address is omitted from the
+-- group key because aggregator volume isn't pool-scoped on the aggregator
+-- side; the per-DEX pool breakdown comes from the Phase 2 query.
 --
 -- Parameters:
 --   {{chain}}           varchar  - lowercase chain (e.g. 'ethereum')
 --   {{token_addresses}} varchar  - comma-separated 0x-hex addresses
 --   {{date}}            varchar  - YYYY-MM-DD lower bound (inclusive)
---
--- The `UNION ALL` over per-chain CoW schemas pre-prunes to the requested
--- chain via the constant-literal `blockchain` projection — the optimizer
--- drops 4 of 5 branches when the predicate `cs.blockchain = '{{chain}}'`
--- is enforced.
 
 WITH addr_list AS (
   SELECT from_hex(REPLACE(LOWER(TRIM(x)), '0x', '')) AS addr
   FROM UNNEST(SPLIT('{{token_addresses}}', ',')) AS t(x)
   WHERE TRIM(x) <> ''
 ),
-trades AS (
+aggregator_rows AS (
   SELECT
-    t.blockchain,
-    t.project,
-    t.version,
-    t.block_date,
-    t.project_contract_address AS pool_address,
-    t.tx_hash,
-    t.evt_index,
+    a.blockchain,
+    'aggregator' AS source_category,
+    a.project    AS source_name,
+    a.version,
+    a.block_date,
     CASE
-      WHEN t.token_bought_address IN (SELECT addr FROM addr_list) THEN t.token_bought_address
-      ELSE t.token_sold_address
+      WHEN a.token_bought_address IN (SELECT addr FROM addr_list) THEN a.token_bought_address
+      ELSE a.token_sold_address
     END AS queried_token_address,
-    t.amount_usd
-  FROM dex.trades t
-  WHERE t.blockchain = '{{chain}}'
-    AND t.block_date >= DATE '{{date}}'
+    a.amount_usd
+  FROM dex_aggregator.trades a
+  WHERE a.blockchain = '{{chain}}'
+    AND a.block_date >= DATE '{{date}}'
+    -- exclude cow_protocol so the per-solver branch owns CoW attribution.
+    AND a.project <> 'cow_protocol'
     AND (
-      t.token_bought_address IN (SELECT addr FROM addr_list)
-      OR t.token_sold_address IN (SELECT addr FROM addr_list)
+      a.token_bought_address IN (SELECT addr FROM addr_list)
+      OR a.token_sold_address IN (SELECT addr FROM addr_list)
     )
 ),
-aggr AS (
-  SELECT
-    blockchain,
-    tx_hash,
-    evt_index,
-    project AS aggr_name
-  FROM dex_aggregator.trades
-  WHERE blockchain = '{{chain}}'
-    AND block_date >= DATE '{{date}}'
-),
-cow_solver_map AS (
-  SELECT 'ethereum' AS blockchain, b.tx_hash,
-         COALESCE(s.name, 'Unknown solver') AS solver_name
-  FROM cow_protocol_ethereum.batches b
-  LEFT JOIN cow_protocol_ethereum.solvers s ON s.address = b.solver_address
-  WHERE b.block_date >= DATE '{{date}}' AND '{{chain}}' = 'ethereum'
+cow_rows AS (
+  SELECT 'ethereum' AS blockchain, 'cow_solver' AS source_category,
+         COALESCE(s.name, 'Unknown solver') AS source_name,
+         CAST(NULL AS varchar) AS version,
+         t.block_date,
+         CASE WHEN t.buy_token_address  IN (SELECT addr FROM addr_list) THEN t.buy_token_address
+              ELSE t.sell_token_address END AS queried_token_address,
+         t.usd_value AS amount_usd
+  FROM cow_protocol_ethereum.trades t
+  LEFT JOIN cow_protocol_ethereum.batches  b ON b.tx_hash  = t.tx_hash
+  LEFT JOIN cow_protocol_ethereum.solvers  s ON s.address = b.solver_address
+  WHERE '{{chain}}' = 'ethereum'
+    AND t.block_date >= DATE '{{date}}'
+    AND (t.buy_token_address IN (SELECT addr FROM addr_list)
+         OR t.sell_token_address IN (SELECT addr FROM addr_list))
   UNION ALL
-  SELECT 'arbitrum', b.tx_hash, COALESCE(s.name, 'Unknown solver')
-  FROM cow_protocol_arbitrum.batches b
+  SELECT 'arbitrum', 'cow_solver', COALESCE(s.name, 'Unknown solver'),
+         CAST(NULL AS varchar), t.block_date,
+         CASE WHEN t.buy_token_address IN (SELECT addr FROM addr_list) THEN t.buy_token_address ELSE t.sell_token_address END,
+         t.usd_value
+  FROM cow_protocol_arbitrum.trades t
+  LEFT JOIN cow_protocol_arbitrum.batches b ON b.tx_hash = t.tx_hash
   LEFT JOIN cow_protocol_arbitrum.solvers s ON s.address = b.solver_address
-  WHERE b.block_date >= DATE '{{date}}' AND '{{chain}}' = 'arbitrum'
+  WHERE '{{chain}}' = 'arbitrum'
+    AND t.block_date >= DATE '{{date}}'
+    AND (t.buy_token_address IN (SELECT addr FROM addr_list)
+         OR t.sell_token_address IN (SELECT addr FROM addr_list))
   UNION ALL
-  SELECT 'base', b.tx_hash, COALESCE(s.name, 'Unknown solver')
-  FROM cow_protocol_base.batches b
+  SELECT 'base', 'cow_solver', COALESCE(s.name, 'Unknown solver'),
+         CAST(NULL AS varchar), t.block_date,
+         CASE WHEN t.buy_token_address IN (SELECT addr FROM addr_list) THEN t.buy_token_address ELSE t.sell_token_address END,
+         t.usd_value
+  FROM cow_protocol_base.trades t
+  LEFT JOIN cow_protocol_base.batches b ON b.tx_hash = t.tx_hash
   LEFT JOIN cow_protocol_base.solvers s ON s.address = b.solver_address
-  WHERE b.block_date >= DATE '{{date}}' AND '{{chain}}' = 'base'
+  WHERE '{{chain}}' = 'base'
+    AND t.block_date >= DATE '{{date}}'
+    AND (t.buy_token_address IN (SELECT addr FROM addr_list)
+         OR t.sell_token_address IN (SELECT addr FROM addr_list))
   UNION ALL
-  SELECT 'gnosis', b.tx_hash, COALESCE(s.name, 'Unknown solver')
-  FROM cow_protocol_gnosis.batches b
+  SELECT 'gnosis', 'cow_solver', COALESCE(s.name, 'Unknown solver'),
+         CAST(NULL AS varchar), t.block_date,
+         CASE WHEN t.buy_token_address IN (SELECT addr FROM addr_list) THEN t.buy_token_address ELSE t.sell_token_address END,
+         t.usd_value
+  FROM cow_protocol_gnosis.trades t
+  LEFT JOIN cow_protocol_gnosis.batches b ON b.tx_hash = t.tx_hash
   LEFT JOIN cow_protocol_gnosis.solvers s ON s.address = b.solver_address
-  WHERE b.block_date >= DATE '{{date}}' AND '{{chain}}' = 'gnosis'
+  WHERE '{{chain}}' = 'gnosis'
+    AND t.block_date >= DATE '{{date}}'
+    AND (t.buy_token_address IN (SELECT addr FROM addr_list)
+         OR t.sell_token_address IN (SELECT addr FROM addr_list))
   UNION ALL
-  SELECT 'polygon', b.tx_hash, COALESCE(s.name, 'Unknown solver')
-  FROM cow_protocol_polygon.batches b
+  SELECT 'polygon', 'cow_solver', COALESCE(s.name, 'Unknown solver'),
+         CAST(NULL AS varchar), t.block_date,
+         CASE WHEN t.buy_token_address IN (SELECT addr FROM addr_list) THEN t.buy_token_address ELSE t.sell_token_address END,
+         t.usd_value
+  FROM cow_protocol_polygon.trades t
+  LEFT JOIN cow_protocol_polygon.batches b ON b.tx_hash = t.tx_hash
   LEFT JOIN cow_protocol_polygon.solvers s ON s.address = b.solver_address
-  WHERE b.block_date >= DATE '{{date}}' AND '{{chain}}' = 'polygon'
+  WHERE '{{chain}}' = 'polygon'
+    AND t.block_date >= DATE '{{date}}'
+    AND (t.buy_token_address IN (SELECT addr FROM addr_list)
+         OR t.sell_token_address IN (SELECT addr FROM addr_list))
 ),
-attributed AS (
-  SELECT
-    t.blockchain,
-    t.project,
-    t.version,
-    t.block_date,
-    t.pool_address,
-    t.queried_token_address,
-    t.amount_usd,
-    -- Prefer CoW solver over generic aggregator label.
-    CASE
-      WHEN cs.solver_name IS NOT NULL THEN 'cow_solver'
-      WHEN a.aggr_name    IS NOT NULL THEN 'aggregator'
-      ELSE 'direct'
-    END AS source_category,
-    CASE
-      WHEN cs.solver_name IS NOT NULL THEN cs.solver_name
-      WHEN a.aggr_name    IS NOT NULL THEN a.aggr_name
-      ELSE 'direct'
-    END AS source_name
-  FROM trades t
-  LEFT JOIN aggr a
-    ON a.blockchain = t.blockchain
-   AND a.tx_hash    = t.tx_hash
-   AND a.evt_index  = t.evt_index
-  LEFT JOIN cow_solver_map cs
-    ON cs.blockchain = t.blockchain
-   AND cs.tx_hash    = t.tx_hash
+combined AS (
+  SELECT * FROM aggregator_rows
+  UNION ALL
+  SELECT * FROM cow_rows
 )
 SELECT
   blockchain,
-  project,
-  version,
-  block_date,
-  '0x' || LOWER(to_hex(pool_address))          AS pool_address,
-  '0x' || LOWER(to_hex(queried_token_address)) AS queried_token_address,
   source_category,
   source_name,
+  version,
+  block_date,
+  '0x' || LOWER(to_hex(queried_token_address)) AS queried_token_address,
   SUM(amount_usd) AS total_amount_usd,
   COUNT(*)        AS trade_count
-FROM attributed
-GROUP BY
-  blockchain, project, version, block_date,
-  pool_address, queried_token_address,
-  source_category, source_name
+FROM combined
+GROUP BY 1,2,3,4,5,6
 ORDER BY total_amount_usd DESC NULLS LAST, block_date DESC
