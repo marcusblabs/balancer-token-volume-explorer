@@ -11,10 +11,12 @@ import PerAddressVolumeChart from './components/PerAddressVolumeChart'
 import BufferActivityPanel from './components/BufferActivityPanel'
 import SourceBreakdownChart from './components/SourceBreakdownChart'
 import SourceBreakdownTable from './components/SourceBreakdownTable'
+import BalancerSourceBreakdown from './components/BalancerSourceBreakdown'
 import ApiKeyPanel from './components/ApiKeyPanel'
 
-const VOLUME_QUERY_ID = (import.meta.env.VITE_DUNE_VOLUME_QUERY_ID ?? '').trim()
-const SOURCE_QUERY_ID = (import.meta.env.VITE_DUNE_SOURCE_QUERY_ID ?? '').trim()
+const VOLUME_QUERY_ID          = (import.meta.env.VITE_DUNE_VOLUME_QUERY_ID ?? '').trim()
+const SOURCE_QUERY_ID          = (import.meta.env.VITE_DUNE_SOURCE_QUERY_ID ?? '').trim()
+const BALANCER_SOURCE_QUERY_ID = (import.meta.env.VITE_DUNE_BALANCER_SOURCE_QUERY_ID ?? '').trim()
 
 const sel = {
   background: '#f7f9fd',
@@ -95,16 +97,17 @@ export default function App() {
   const expandedCount = expansion?.expandedAddresses?.length ?? 0
 
   // ── Volume + source queries (Phase 2 + 4) ─────────────────────────────────
-  const volumeQuery = useDuneQuery(VOLUME_QUERY_ID || undefined)
-  const sourceQuery = useDuneQuery(SOURCE_QUERY_ID || undefined)
+  const volumeQuery          = useDuneQuery(VOLUME_QUERY_ID || undefined)
+  const sourceQuery          = useDuneQuery(SOURCE_QUERY_ID || undefined)
+  const balancerSourceQuery  = useDuneQuery(BALANCER_SOURCE_QUERY_ID || undefined)
 
   const [queriedToken, setQueriedToken] = useState(null)
   const [runStamp, setRunStamp] = useState(0)
 
   const isRunning = useMemo(() => {
     const r = (s) => s === STATUS.EXECUTING || s === STATUS.POLLING
-    return r(volumeQuery.status) || r(sourceQuery.status)
-  }, [volumeQuery.status, sourceQuery.status])
+    return r(volumeQuery.status) || r(sourceQuery.status) || r(balancerSourceQuery.status)
+  }, [volumeQuery.status, sourceQuery.status, balancerSourceQuery.status])
 
   // Wrapper resolver: input is the union of expanded addresses AND every
   // paired address that came back in volume rows.
@@ -244,13 +247,15 @@ export default function App() {
       token_addresses: expandedAddresses.join(','),
       date,
     }
-    if (VOLUME_QUERY_ID) volumeQuery.run({ queryId: VOLUME_QUERY_ID, params })
-    if (SOURCE_QUERY_ID) sourceQuery.run({ queryId: SOURCE_QUERY_ID, params })
+    if (VOLUME_QUERY_ID)          volumeQuery.run({ queryId: VOLUME_QUERY_ID, params })
+    if (SOURCE_QUERY_ID)          sourceQuery.run({ queryId: SOURCE_QUERY_ID, params })
+    if (BALANCER_SOURCE_QUERY_ID) balancerSourceQuery.run({ queryId: BALANCER_SOURCE_QUERY_ID, params })
   }
 
   const handleCancel = () => {
     volumeQuery.cancel()
     sourceQuery.cancel()
+    balancerSourceQuery.cancel()
   }
 
   const handleChainChange = (c) => {
@@ -264,6 +269,7 @@ export default function App() {
       style={{
         minHeight: '100vh',
         background: 'linear-gradient(160deg, #eef2f8 0%, #dde5f2 55%, #cfd9ea 100%)',
+        backgroundAttachment: 'fixed',
         fontFamily: "'JetBrains Mono', monospace",
         color: '#243447',
       }}
@@ -409,6 +415,10 @@ export default function App() {
               <SourceBreakdownChart rows={sourceQuery.rows} />
               <SourceBreakdownTable rows={sourceQuery.rows} />
             </>
+          )}
+
+          {balancerSourceQuery.rows?.length > 0 && (
+            <BalancerSourceBreakdown rows={balancerSourceQuery.rows} queriedToken={queriedToken} />
           )}
 
           {!VOLUME_QUERY_ID && (
