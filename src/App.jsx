@@ -109,6 +109,18 @@ export default function App() {
     return r(volumeQuery.status) || r(sourceQuery.status) || r(balancerSourceQuery.status)
   }, [volumeQuery.status, sourceQuery.status, balancerSourceQuery.status])
 
+  // Total per-DEX volume across the expanded address set (excluding paired-
+  // side duplicates). Used to flag low aggregator-attribution coverage on
+  // chains where Dune hasn't spelled every aggregator yet.
+  const dexTotalUsd = useMemo(() => {
+    let total = 0
+    for (const r of volumeQuery.rows ?? []) {
+      const v = Number(r.total_amount_usd ?? 0)
+      if (Number.isFinite(v)) total += v
+    }
+    return total
+  }, [volumeQuery.rows])
+
   // Wrapper resolver: input is the union of expanded addresses AND every
   // paired address that came back in volume rows.
   const pairedAddresses = useMemo(() => {
@@ -412,7 +424,7 @@ export default function App() {
 
           {sourceQuery.rows?.length > 0 && (
             <>
-              <SourceBreakdownChart rows={sourceQuery.rows} />
+              <SourceBreakdownChart rows={sourceQuery.rows} dexTotalUsd={dexTotalUsd} />
               <SourceBreakdownTable rows={sourceQuery.rows} />
             </>
           )}

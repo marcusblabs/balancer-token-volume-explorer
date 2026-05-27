@@ -21,7 +21,7 @@ function fmtUsd(n) {
  *
  * One row per (category, source_name), sorted by USD descending.
  */
-export default function SourceBreakdownChart({ rows }) {
+export default function SourceBreakdownChart({ rows, dexTotalUsd = 0 }) {
   const data = useMemo(() => {
     const agg = new Map() // `${category}::${source}` -> { category, source, usd, trades }
     for (const r of rows ?? []) {
@@ -46,11 +46,40 @@ export default function SourceBreakdownChart({ rows }) {
   const maxBar = data[0].usd || 1
   const totalUsd = data.reduce((a, b) => a + b.usd, 0)
 
+  // Coverage flag: how much of the per-DEX volume is NOT attributed here.
+  // dex_aggregator.trades + cow_protocol.*.trades only cover sources Dune
+  // has spelled. On newer chains (e.g. Monad) only 0x API + sushiswap are
+  // present, so the chart can drastically understate routed volume.
+  const unattributedUsd = Math.max(0, (dexTotalUsd || 0) - totalUsd)
+  const coverageGapPct  = dexTotalUsd > 0 ? unattributedUsd / dexTotalUsd : 0
+  const showCoverageWarning = dexTotalUsd > 0 && coverageGapPct > 0.10
+
   return (
     <Card
       title="Volume by aggregator / CoW solver"
       subtitle={`${data.length} sources · total ${fmtUsd(totalUsd)} routed`}
     >
+      {showCoverageWarning && (
+        <div style={{
+          marginBottom: 12,
+          padding: '10px 14px',
+          background: '#fff7e6',
+          border: '1px solid #f0c987',
+          borderRadius: 8,
+          fontSize: 12,
+          color: '#8a6200',
+          lineHeight: 1.4,
+        }}>
+          <strong>Coverage flag.</strong>{' '}
+          Aggregator + CoW sources here sum to <strong>{fmtUsd(totalUsd)}</strong>,
+          but the per-DEX total for this address set is <strong>{fmtUsd(dexTotalUsd)}</strong>{' '}
+          — {fmtUsd(unattributedUsd)} ({(coverageGapPct * 100).toFixed(1)}%) is
+          either direct (users hitting DEX routers without an aggregator) or
+          went through an aggregator Dune hasn't spelled into{' '}
+          <code style={{ fontFamily: "'JetBrains Mono', monospace" }}>dex_aggregator.trades</code>{' '}
+          on this chain yet.
+        </div>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {data.map((p) => (
           <div key={`${p.category}-${p.source}`} style={{ display: 'grid', gridTemplateColumns: '180px 1fr 110px', gap: 8, alignItems: 'center' }}>
