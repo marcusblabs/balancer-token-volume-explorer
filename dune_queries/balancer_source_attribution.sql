@@ -1,16 +1,21 @@
 -- Balancer-only source attribution.
 --
--- Base set: dex.trades rows where project='balancer' that touch the address
--- list. Each row is enriched with whichever aggregator / CoW solver triggered
--- it (left joined). Where neither matches, the row is 'direct' (a user trade
--- via the Balancer router with no aggregator on top).
+-- Base set: Balancer-pool trades that touch the address list. Each row is
+-- enriched with whichever aggregator / CoW solver triggered it (left joined).
+-- Where neither matches, the row is 'direct' (a user trade via the Balancer
+-- router with no aggregator on top).
 --
--- Why this is correct here even though the cross-DEX Phase-4 query reads from
--- dex_aggregator.trades directly: this query is scoped to a single
--- destination DEX (Balancer), so the LEFT JOIN approach doesn't risk
--- mislabeling rows on other venues. The semantics are "for the Balancer-
--- pool volume we're already seeing in dex.trades, how was each trade
--- triggered?"
+-- Why we pull v3 rows from balancer_v3_<chain>.trades instead of dex.trades:
+-- on chains where dex.trades' price oracle hasn't been wired for the v3
+-- wrapper tokens yet (Monad is the live example), dex.trades has
+-- amount_usd = NULL for every wrapper↔wrapper swap. The per-chain v3
+-- spellbook prices them correctly. For Balancer v2 (and any v1 still in
+-- flight) we keep using dex.trades since those don't have the wrapper-
+-- pricing problem.
+--
+-- Why LEFT JOIN attribution is safe here: scoped to a single destination
+-- DEX (Balancer), no risk of mislabeling other venues. 'direct' bucket
+-- meaningfully captures retail / direct-router Balancer trades.
 --
 -- Parameters: {{chain}}, {{token_addresses}}, {{date}}
 
@@ -19,27 +24,73 @@ WITH addr_list AS (
   FROM UNNEST(SPLIT('{{token_addresses}}', ',')) AS t(x)
   WHERE TRIM(x) <> ''
 ),
-bal_trades AS (
+bal_v2_etc AS (
   SELECT
-    t.blockchain,
-    t.version,
-    t.block_date,
-    t.tx_hash,
-    t.evt_index,
+    t.blockchain, t.version, t.block_date, t.tx_hash, t.evt_index,
     t.project_contract_address AS pool_address,
-    CASE
-      WHEN t.token_bought_address IN (SELECT addr FROM addr_list) THEN t.token_bought_address
-      ELSE t.token_sold_address
-    END AS queried_token_address,
+    CASE WHEN t.token_bought_address IN (SELECT addr FROM addr_list) THEN t.token_bought_address ELSE t.token_sold_address END AS queried_token_address,
     t.amount_usd
   FROM dex.trades t
   WHERE t.blockchain = '{{chain}}'
     AND t.block_date >= DATE '{{date}}'
-    AND t.project = 'balancer'
-    AND (
-      t.token_bought_address IN (SELECT addr FROM addr_list)
-      OR t.token_sold_address IN (SELECT addr FROM addr_list)
-    )
+    AND t.project   = 'balancer'
+    AND t.version  <> '3'
+    AND (t.token_bought_address IN (SELECT addr FROM addr_list)
+         OR t.token_sold_address IN (SELECT addr FROM addr_list))
+),
+bal_v3 AS (
+  SELECT blockchain, '3' AS version, block_date, tx_hash, evt_index,
+         project_contract_address AS pool_address,
+         CASE WHEN token_bought_address IN (SELECT addr FROM addr_list) THEN token_bought_address ELSE token_sold_address END AS queried_token_address,
+         amount_usd
+  FROM balancer_v3_ethereum.trades
+  WHERE '{{chain}}' = 'ethereum' AND block_date >= DATE '{{date}}'
+    AND (token_bought_address IN (SELECT addr FROM addr_list) OR token_sold_address IN (SELECT addr FROM addr_list))
+  UNION ALL
+  SELECT blockchain, '3', block_date, tx_hash, evt_index, project_contract_address,
+         CASE WHEN token_bought_address IN (SELECT addr FROM addr_list) THEN token_bought_address ELSE token_sold_address END,
+         amount_usd
+  FROM balancer_v3_arbitrum.trades
+  WHERE '{{chain}}' = 'arbitrum' AND block_date >= DATE '{{date}}'
+    AND (token_bought_address IN (SELECT addr FROM addr_list) OR token_sold_address IN (SELECT addr FROM addr_list))
+  UNION ALL
+  SELECT blockchain, '3', block_date, tx_hash, evt_index, project_contract_address,
+         CASE WHEN token_bought_address IN (SELECT addr FROM addr_list) THEN token_bought_address ELSE token_sold_address END,
+         amount_usd
+  FROM balancer_v3_base.trades
+  WHERE '{{chain}}' = 'base' AND block_date >= DATE '{{date}}'
+    AND (token_bought_address IN (SELECT addr FROM addr_list) OR token_sold_address IN (SELECT addr FROM addr_list))
+  UNION ALL
+  SELECT blockchain, '3', block_date, tx_hash, evt_index, project_contract_address,
+         CASE WHEN token_bought_address IN (SELECT addr FROM addr_list) THEN token_bought_address ELSE token_sold_address END,
+         amount_usd
+  FROM balancer_v3_gnosis.trades
+  WHERE '{{chain}}' = 'gnosis' AND block_date >= DATE '{{date}}'
+    AND (token_bought_address IN (SELECT addr FROM addr_list) OR token_sold_address IN (SELECT addr FROM addr_list))
+  UNION ALL
+  SELECT blockchain, '3', block_date, tx_hash, evt_index, project_contract_address,
+         CASE WHEN token_bought_address IN (SELECT addr FROM addr_list) THEN token_bought_address ELSE token_sold_address END,
+         amount_usd
+  FROM balancer_v3_avalanche_c.trades
+  WHERE '{{chain}}' = 'avalanche_c' AND block_date >= DATE '{{date}}'
+    AND (token_bought_address IN (SELECT addr FROM addr_list) OR token_sold_address IN (SELECT addr FROM addr_list))
+  UNION ALL
+  SELECT blockchain, '3', block_date, tx_hash, evt_index, project_contract_address,
+         CASE WHEN token_bought_address IN (SELECT addr FROM addr_list) THEN token_bought_address ELSE token_sold_address END,
+         amount_usd
+  FROM balancer_v3_hyperevm.trades
+  WHERE '{{chain}}' = 'hyperevm' AND block_date >= DATE '{{date}}'
+    AND (token_bought_address IN (SELECT addr FROM addr_list) OR token_sold_address IN (SELECT addr FROM addr_list))
+  UNION ALL
+  SELECT blockchain, '3', block_date, tx_hash, evt_index, project_contract_address,
+         CASE WHEN token_bought_address IN (SELECT addr FROM addr_list) THEN token_bought_address ELSE token_sold_address END,
+         amount_usd
+  FROM balancer_v3_monad.trades
+  WHERE '{{chain}}' = 'monad' AND block_date >= DATE '{{date}}'
+    AND (token_bought_address IN (SELECT addr FROM addr_list) OR token_sold_address IN (SELECT addr FROM addr_list))
+),
+bal_trades AS (
+  SELECT * FROM bal_v2_etc UNION ALL SELECT * FROM bal_v3
 ),
 agg_lookup AS (
   SELECT blockchain, tx_hash, evt_index, project AS aggr_name
@@ -76,11 +127,7 @@ cow_solver_map AS (
 ),
 attributed AS (
   SELECT
-    t.blockchain,
-    t.version,
-    t.block_date,
-    t.queried_token_address,
-    t.amount_usd,
+    t.blockchain, t.version, t.block_date, t.queried_token_address, t.amount_usd,
     CASE
       WHEN cs.solver_name IS NOT NULL THEN 'cow_solver'
       WHEN a.aggr_name    IS NOT NULL THEN 'aggregator'
@@ -93,19 +140,13 @@ attributed AS (
     END AS source_name
   FROM bal_trades t
   LEFT JOIN agg_lookup a
-    ON a.blockchain = t.blockchain
-   AND a.tx_hash    = t.tx_hash
-   AND a.evt_index  = t.evt_index
+    ON a.blockchain = t.blockchain AND a.tx_hash = t.tx_hash AND a.evt_index = t.evt_index
   LEFT JOIN cow_solver_map cs
-    ON cs.blockchain = t.blockchain
-   AND cs.tx_hash    = t.tx_hash
+    ON cs.blockchain = t.blockchain AND cs.tx_hash = t.tx_hash
 )
 SELECT
-  blockchain,
-  source_category,
-  source_name,
-  version AS balancer_version,
-  block_date,
+  blockchain, source_category, source_name,
+  version AS balancer_version, block_date,
   '0x' || LOWER(to_hex(queried_token_address)) AS queried_token_address,
   SUM(amount_usd) AS total_amount_usd,
   COUNT(*)        AS trade_count
