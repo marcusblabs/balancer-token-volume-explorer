@@ -160,6 +160,23 @@ export default function App() {
   // ── Post-process rows: paired_display + is_buffer_op + filter ─────────────
   const wrapperMap = wrapperResolver.data
 
+  // The all-zeros sentinel address is used by some DEXes (notably Uniswap v4)
+  // to represent the chain's NATIVE gas token (not a wrapped version). Resolve
+  // it to a human-readable symbol per chain.
+  const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+  const NATIVE_GAS_SYMBOL = {
+    ethereum: 'ETH',
+    base:     'ETH',
+    arbitrum: 'ETH',
+    optimism: 'ETH',
+    polygon:  'POL',
+    hyperevm: 'HYPE',
+    monad:    'MON',
+    gnosis:   'xDAI',
+    avalanche: 'AVAX',
+    sonic:    'S',
+  }
+
   const enrichRow = (r) => {
     const queriedAddr = lower(r.queried_token_address ?? '')
     const pairedAddr = lower(r.paired_token_address ?? '')
@@ -171,6 +188,9 @@ export default function App() {
     let pairedDisplay
     if (pairedWrap && unwrapPaired) {
       pairedDisplay = `${pairedWrap.underlyingSymbol} (was ${pairedWrap.wrapperSymbol})`
+    } else if (pairedAddr === ZERO_ADDRESS) {
+      const sym = NATIVE_GAS_SYMBOL[chain] ?? 'native'
+      pairedDisplay = `${sym} (native)`
     } else if (pairedAddr) {
       // Fall back to TokenSelect registry lookup for a readable symbol.
       const fromRegistry = (resolvedRegistry[chain] ?? []).find((t) => t.address.toLowerCase() === pairedAddr)
