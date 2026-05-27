@@ -27,10 +27,11 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          VITE_DUNE_API_KEY:          ${{ secrets.VITE_DUNE_API_KEY }}
-          VITE_DUNE_QUERY_ID:         ${{ secrets.VITE_DUNE_QUERY_ID }}
-          VITE_DUNE_VOLUME_QUERY_ID:  ${{ secrets.VITE_DUNE_VOLUME_QUERY_ID }}
-          VITE_DUNE_SOURCE_QUERY_ID:  ${{ secrets.VITE_DUNE_SOURCE_QUERY_ID }}
+          VITE_DUNE_API_KEY:                  ${{ secrets.VITE_DUNE_API_KEY }}
+          VITE_DUNE_QUERY_ID:                 ${{ secrets.VITE_DUNE_QUERY_ID }}
+          VITE_DUNE_VOLUME_QUERY_ID:          ${{ secrets.VITE_DUNE_VOLUME_QUERY_ID }}
+          VITE_DUNE_SOURCE_QUERY_ID:          ${{ secrets.VITE_DUNE_SOURCE_QUERY_ID }}
+          VITE_DUNE_BALANCER_SOURCE_QUERY_ID: ${{ secrets.VITE_DUNE_BALANCER_SOURCE_QUERY_ID }}
       - name: Add .nojekyll
         run: touch dist/.nojekyll
       - uses: actions/configure-pages@v5
