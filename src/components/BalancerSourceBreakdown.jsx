@@ -1,9 +1,13 @@
 import { useMemo, useState } from 'react'
 
 const CATEGORY_COLOR = {
-  aggregator: '#3b82f6',
-  cow_solver: '#8b5cf6',
-  direct:     '#16a34a',
+  aggregator: '#3b82f6',  // blue
+  cow_solver: '#8b5cf6',  // purple
+  direct:     '#16a34a',  // green — only real Balancer-router trades
+  mev_bot:    '#ef4444',  // red — sandwich/arbitrage bots
+  cex:        '#f59e0b',  // amber — exchange hot wallets
+  protocol:   '#0ea5e9',  // cyan — other DeFi protocols using Balancer pools
+  unknown:    '#6b7280',  // gray — unclassified
 }
 
 function fmtUsd(n) {
@@ -64,6 +68,9 @@ export default function BalancerSourceBreakdown({ rows, queriedToken }) {
             { id: 'aggregator', label: 'Aggregators' },
             { id: 'cow_solver', label: 'CoW solvers' },
             { id: 'direct',     label: 'Direct' },
+            { id: 'mev_bot',    label: 'MEV bots' },
+            { id: 'protocol',   label: 'Protocols' },
+            { id: 'unknown',    label: 'Unknown' },
           ].map((f) => (
             <button
               key={f.id}
@@ -122,7 +129,11 @@ export default function BalancerSourceBreakdown({ rows, queriedToken }) {
       <div style={{ marginTop: 12, display: 'flex', gap: 12, fontSize: 11, flexWrap: 'wrap' }}>
         <Legend color={CATEGORY_COLOR.aggregator} label="aggregator" />
         <Legend color={CATEGORY_COLOR.cow_solver} label="cow_solver" />
-        <Legend color={CATEGORY_COLOR.direct}     label="direct (user trade via router)" />
+        <Legend color={CATEGORY_COLOR.direct}     label="direct (Balancer router)" />
+        <Legend color={CATEGORY_COLOR.mev_bot}    label="mev_bot (sandwich / arb)" />
+        <Legend color={CATEGORY_COLOR.protocol}   label="protocol (DeFi integrator)" />
+        <Legend color={CATEGORY_COLOR.cex}        label="cex" />
+        <Legend color={CATEGORY_COLOR.unknown}    label="unknown" />
       </div>
     </div>
   )
