@@ -103,19 +103,24 @@ export async function fetchErc4626Index(gqlChain, { signal } = {}) {
   if (erc4626IndexInflight.has(gqlChain)) return erc4626IndexInflight.get(gqlChain)
 
   const promise = (async () => {
-    const data = await gqlRequest(
-      `query Erc4626($chain: GqlChain!) {
-         tokenGetTokens(chains: [$chain], where: { typeIn: [ERC4626] }) { ${TOKEN_FIELDS} }
-       }`,
-      { chain: gqlChain },
-      { signal },
-    )
-    const list = data.tokenGetTokens ?? []
-    erc4626IndexCache.set(gqlChain, list)
-    erc4626IndexInflight.delete(gqlChain)
-    // Side-effect: warm the per-token cache too.
-    for (const t of list) tokenByAddressCache.set(`${gqlChain}:${lower(t.address)}`, t)
-    return list
+    try {
+      const data = await gqlRequest(
+        `query Erc4626($chain: GqlChain!) {
+           tokenGetTokens(chains: [$chain], where: { typeIn: [ERC4626] }) { ${TOKEN_FIELDS} }
+         }`,
+        { chain: gqlChain },
+        { signal },
+      )
+      const list = data.tokenGetTokens ?? []
+      erc4626IndexCache.set(gqlChain, list)
+      // Side-effect: warm the per-token cache too.
+      for (const t of list) tokenByAddressCache.set(`${gqlChain}:${lower(t.address)}`, t)
+      return list
+    } finally {
+      // Always clear the inflight entry, success or failure — otherwise a
+      // single transient error would poison the whole session.
+      erc4626IndexInflight.delete(gqlChain)
+    }
   })()
   erc4626IndexInflight.set(gqlChain, promise)
   return promise

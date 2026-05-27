@@ -108,10 +108,20 @@ export function useBalancerAddressExpansion(chain, tokenAddress) {
 
     ;(async () => {
       try {
-        const [tokenMap, erc4626Index] = await Promise.all([
+        // Settle independently — a flake on the (potentially heavy) ERC4626
+        // index shouldn't throw away a perfectly good single-token lookup.
+        const [tokenSettled, indexSettled] = await Promise.allSettled([
           fetchTokens(gqlChain, [tokenAddress], { signal: controller.signal }),
           fetchErc4626Index(gqlChain, { signal: controller.signal }),
         ])
+        if (tokenSettled.status === 'rejected') throw tokenSettled.reason
+        const tokenMap = tokenSettled.value
+        const erc4626Index = indexSettled.status === 'fulfilled' ? indexSettled.value : []
+        const indexError = indexSettled.status === 'rejected' ? indexSettled.reason : null
+        if (indexError && indexError.name !== 'AbortError') {
+          // eslint-disable-next-line no-console
+          console.warn('Balancer ERC4626 index lookup failed, no wrappers will be listed:', indexError)
+        }
         const inputTok = tokenMap.get(lower(tokenAddress))
 
         // If input is a wrapper, fetch the underlying token's meta too.
